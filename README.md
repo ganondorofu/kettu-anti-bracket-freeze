@@ -32,17 +32,28 @@ npm install
 npm run build
 ```
 
-This bundles `index.ts` into `index.js` (IIFE, `plugin` global) via esbuild, matching the format Kettu's plugin loader expects:
+This bundles `index.ts` into `builds/anti-bracket-freeze/index.js` (IIFE, `plugin` global) via esbuild, and copies `manifest.json` alongside it, matching the format Kettu's plugin loader expects:
 
 ```js
 (bunny, definePlugin) => { /* index.js contents */ ; return plugin?.default ?? plugin; }
 ```
 
+## Repository layout
+
+Kettu installs plugins from a *repository* URL, not a single manifest. The repo root must expose:
+
+```
+repo.json                          # { "$meta": {...}, "<plugin-id>": { "version": "..." } }
+builds/<plugin-id>/manifest.json
+builds/<plugin-id>/index.js
+```
+
 ## Installing in Kettu
 
-1. Host this repo's raw files somewhere reachable (e.g. GitHub Pages, or a raw GitHub URL) with `manifest.json` and the built `index.js` at the root.
-2. In Kettu, go to Plugins and add the plugin repo URL (the URL to `manifest.json`).
-3. Enable **AntiBracketFreeze**.
+1. Push this repo to GitHub (or host it anywhere reachable) so `repo.json` is served at the root, e.g.
+   `https://raw.githubusercontent.com/ganondorofu/kettu-anti-bracket-freeze/master/`
+2. In Kettu, go to Plugins → add a plugin repository, and paste that base URL (the folder containing `repo.json`, not `repo.json` itself).
+3. The repo should now list **AntiBracketFreeze** — install and enable it.
 
 ## Debugging
 

@@ -1,0 +1,12 @@
+{
+  "id": "anti-bracket-freeze",
+  "version": "1.0.0",
+  "type": "plugin",
+  "spec": 3,
+  "main": "index.js",
+  "display": {
+    "name": "AntiBracketFreeze",
+    "description": "Blocks potentially ReDoS-triggering content at the Flux layer",
+    "authors": [{ "name": "56" }]
+  }
+}
