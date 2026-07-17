@@ -15,6 +15,8 @@ This plugin patches two things (via Kettu's legacy `vendetta`-compat API):
 
 Blocked message content is replaced with a placeholder string. The original content is written to the plugin's logger and kept in `globalThis.__antiBFLog` for debugging, and can also be viewed in-app: long-press a blocked message and tap **Show Original** in the action sheet. This renders the raw text directly via `ReactNative.Text` in a custom alert — deliberately *not* using Discord's built-in Alert `content`/`body` prop, since that gets run through the same Markdown renderer this plugin exists to protect against (which is also why an earlier version of this reveal felt slow on large payloads). The preview is also capped at 2000 characters to avoid laying out huge blobs of text.
 
+Since `showCustomAlert` renders the component bare (no backdrop, card, or close button of its own), the view builds all of that itself: a dimmed backdrop, a dark card behind the monospace text so it's readable, and an explicit **Close** button that calls the underlying alert module's `close()`.
+
 > The long-press "Show Original" button patches Discord's `MessageLongPressActionSheet` (found via `findByProps("openLazy", "hideActionSheet")`), based on a pattern used by other published Kettu plugins. It hasn't been verified against every Discord client build — if the row doesn't appear, the block/placeholder behavior still works regardless, and blocked content remains available via `globalThis.__antiBFLog`.
 
 ### Detection thresholds

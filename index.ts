@@ -140,23 +140,57 @@ function patchOutgoing() {
     }
 }
 
+// Same module `vendetta.ui.alerts.showCustomAlert` opens things through
+// (found via the same findByProps signature used internally), kept around so
+// we can dismiss the alert ourselves via its `close()`.
+let AlertsModule: any = null;
+
 // Plain-text viewer for blocked content. Deliberately renders via
 // ReactNative.Text directly instead of passing the string into Discord's own
 // Alert `content`/`body` prop — that prop gets run through Discord's Markdown
 // renderer (the same one vulnerable to the ReDoS this plugin guards against),
 // which defeats the purpose and is why the old confirmation-alert reveal felt
-// heavy/slow on large blocked payloads.
+// heavy/slow on large blocked payloads. Since showCustomAlert renders the
+// component bare (no backdrop/card/close button of its own), all of that is
+// built here by hand.
 function BlockedContentView({ content }: { content: string; }) {
     const truncated = content.length > MAX_PREVIEW_LENGTH;
     const shown = truncated ? content.slice(0, MAX_PREVIEW_LENGTH) : content;
 
+    const close = () => {
+        try {
+            AlertsModule?.close?.();
+        } catch { }
+    };
+
     return React.createElement(
-        ReactNative.ScrollView,
-        { style: { maxHeight: 400, padding: 16 } },
+        ReactNative.View,
+        { style: { flex: 1, backgroundColor: "rgba(0,0,0,0.75)", justifyContent: "center", padding: 24 } },
         React.createElement(
-            ReactNative.Text,
-            { selectable: true, style: { color: "white", fontFamily: "monospace" } },
-            shown + (truncated ? `\n…(${content.length - MAX_PREVIEW_LENGTH} more characters truncated)` : "")
+            ReactNative.View,
+            { style: { backgroundColor: "#2b2d31", borderRadius: 8, padding: 16, maxHeight: "80%" } },
+            React.createElement(
+                ReactNative.Text,
+                { style: { color: "white", fontSize: 16, fontWeight: "bold", marginBottom: 8 } },
+                "Blocked Message"
+            ),
+            React.createElement(
+                ReactNative.ScrollView,
+                { style: { maxHeight: 360 } },
+                React.createElement(
+                    ReactNative.Text,
+                    { selectable: true, style: { color: "#dcddde", fontFamily: "monospace", backgroundColor: "#1e1f22", padding: 8, borderRadius: 4 } },
+                    shown + (truncated ? `\n…(${content.length - MAX_PREVIEW_LENGTH} more characters truncated)` : "")
+                )
+            ),
+            React.createElement(
+                ReactNative.TouchableOpacity,
+                {
+                    onPress: close,
+                    style: { alignSelf: "flex-end", marginTop: 12, paddingHorizontal: 14, paddingVertical: 8, backgroundColor: "#4f545c", borderRadius: 4 },
+                },
+                React.createElement(ReactNative.Text, { style: { color: "white", fontWeight: "bold" } }, "Close")
+            )
         )
     );
 }
@@ -206,6 +240,7 @@ let unpatchActionSheet: (() => void) | null = null;
 
 function patchMessageLongPressSheet() {
     LazyActionSheet = vendetta.metro.findByProps("openLazy", "hideActionSheet");
+    AlertsModule = vendetta.metro.findByProps("openLazy", "close");
     if (!LazyActionSheet || typeof LazyActionSheet.openLazy !== "function") return;
 
     unpatchActionSheet = vendetta.patcher.before("openLazy", LazyActionSheet, ([component, key, ctx]: any[]) => {
