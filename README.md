@@ -8,11 +8,10 @@ This is the Kettu (mobile) rewrite of [vencord-anti-bracket-freeze](https://gith
 
 Discord's Markdown renderer is vulnerable to ReDoS (Regular Expression Denial of Service) attacks. Certain crafted strings — such as a large number of consecutive `[` brackets, pipe characters, backticks, or Unicode combining characters — can cause the renderer to hang, freezing the client.
 
-This plugin patches `FluxDispatcher.dispatch` (via Kettu's legacy `vendetta`-compat API) to sanitize dangerous content before it reaches the Flux store / renderer:
+This plugin patches two things (via Kettu's legacy `vendetta`-compat API):
 
-- Message content (`MESSAGE_CREATE`, `MESSAGE_UPDATE`, `LOAD_MESSAGES_SUCCESS`)
-- Channel names and topics (`CHANNEL_CREATE`, `CHANNEL_UPDATE`)
-- Server names, descriptions, role names, and channel/thread lists (`GUILD_CREATE`, `GUILD_UPDATE`, `CONNECTION_OPEN`)
+- `FluxDispatcher.dispatch` — sanitizes incoming/loaded content before it reaches the Flux store / renderer: message content (`MESSAGE_CREATE`, `MESSAGE_UPDATE`, `LOAD_MESSAGES_SUCCESS`), channel names/topics (`CHANNEL_CREATE`, `CHANNEL_UPDATE`), and server names/descriptions/role names/channel lists (`GUILD_CREATE`, `GUILD_UPDATE`, `CONNECTION_OPEN`).
+- `MessageActions.sendMessage` / `editMessage` — blocks your own outgoing dangerous content before it's sent at all. This is necessary because the client renders your own sent message optimistically through the send call, not through `FluxDispatcher.dispatch`, so the dispatch patch alone doesn't catch your own messages.
 
 Blocked message content is replaced with a placeholder string. The original content is written to the plugin's logger and kept in `globalThis.__antiBFLog` for debugging, and can also be viewed in-app: long-press a blocked message and tap **Show Original** in the action sheet, which shows the raw text in a plain alert dialog (not passed through the Markdown renderer, so it stays safe).
 

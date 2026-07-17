@@ -11,6 +11,7 @@ const logger = vendetta.logger;
 const { findInReactTree } = vendetta.utils;
 const { showConfirmationAlert } = vendetta.ui.alerts;
 const { getAssetIDByName } = vendetta.ui.assets;
+const { showToast } = vendetta.ui.toasts;
 
 const COMBINING_TEST = /[̀-ͯ҃-҉᷀-᷿⃐-⃿]{50,}/;
 
@@ -65,34 +66,72 @@ function patchGuild(guild: any) {
     guild.roles?.forEach?.((r: any) => sanitizeStr(r, "name", "role"));
 }
 
-let origDispatch: Function | null = null;
-
-function patchedDispatch(this: any, action: any) {
-    try {
-        switch (action?.type) {
-            case "MESSAGE_CREATE":
-            case "MESSAGE_UPDATE":
-                patchMessage(action.message);
-                break;
-            case "LOAD_MESSAGES_SUCCESS":
-                action.messages?.forEach?.(patchMessage);
-                break;
-            case "GUILD_CREATE":
-            case "GUILD_UPDATE":
-                patchGuild(action.guild);
-                break;
-            case "CHANNEL_CREATE":
-            case "CHANNEL_UPDATE":
-                patchChannel(action.channel);
-                break;
-            case "CONNECTION_OPEN":
-                action.guilds?.forEach?.(patchGuild);
-                break;
-        }
-    } catch (e) {
-        logger?.error("[AntiBracketFreeze] dispatch error:", e);
+function sanitizeDispatchAction(action: any) {
+    switch (action?.type) {
+        case "MESSAGE_CREATE":
+        case "MESSAGE_UPDATE":
+            patchMessage(action.message);
+            break;
+        case "LOAD_MESSAGES_SUCCESS":
+            action.messages?.forEach?.(patchMessage);
+            break;
+        case "GUILD_CREATE":
+        case "GUILD_UPDATE":
+            patchGuild(action.guild);
+            break;
+        case "CHANNEL_CREATE":
+        case "CHANNEL_UPDATE":
+            patchChannel(action.channel);
+            break;
+        case "CONNECTION_OPEN":
+            action.guilds?.forEach?.(patchGuild);
+            break;
     }
-    return origDispatch!.call(this, action);
+}
+
+let unpatchDispatch: (() => void) | null = null;
+
+// Covers incoming/loaded content (messages from others, guild/channel data).
+// This alone does NOT reliably catch your own outgoing messages, since the
+// client renders its own sent message optimistically via sendMessage/editMessage
+// before/without necessarily round-tripping through this dispatch — see
+// patchOutgoing() below for that path.
+function patchDispatch() {
+    unpatchDispatch = vendetta.patcher.instead("dispatch", FluxDispatcher, (args: any[], orig: Function) => {
+        try {
+            sanitizeDispatchAction(args[0]);
+        } catch (e) {
+            logger?.error("[AntiBracketFreeze] dispatch error:", e);
+        }
+        return orig.apply(FluxDispatcher, args);
+    });
+}
+
+let unpatchSend: (() => void) | null = null;
+let unpatchEdit: (() => void) | null = null;
+
+// Blocks your own outgoing dangerous content before it's ever sent.
+function patchOutgoing() {
+    const MessageActions = vendetta.metro.findByProps("sendMessage", "editMessage");
+    if (!MessageActions) return;
+
+    const blockOutgoing = (message: any) => {
+        if (!message || !isDangerous(message.content)) return;
+        log("outgoing", "content", message.content);
+        message.content = "";
+        showToast?.("Blocked a message containing a possible ReDoS payload");
+    };
+
+    if (typeof MessageActions.sendMessage === "function") {
+        unpatchSend = vendetta.patcher.before("sendMessage", MessageActions, (args: any[]) => {
+            blockOutgoing(args[1]);
+        });
+    }
+    if (typeof MessageActions.editMessage === "function") {
+        unpatchEdit = vendetta.patcher.before("editMessage", MessageActions, (args: any[]) => {
+            blockOutgoing(args[2]);
+        });
+    }
 }
 
 // Adds a "Show Original" row to the message long-press action sheet when the
@@ -165,9 +204,14 @@ function patchMessageLongPressSheet() {
 }
 
 function onLoad() {
-    origDispatch = FluxDispatcher.dispatch.bind(FluxDispatcher);
-    FluxDispatcher.dispatch = patchedDispatch;
+    patchDispatch();
     (globalThis as any).__antiBFLog = sanitizeLog;
+
+    try {
+        patchOutgoing();
+    } catch (e) {
+        logger?.error("[AntiBracketFreeze] failed to patch outgoing send/edit:", e);
+    }
 
     try {
         patchMessageLongPressSheet();
@@ -177,10 +221,12 @@ function onLoad() {
 }
 
 function onUnload() {
-    if (origDispatch) {
-        FluxDispatcher.dispatch = origDispatch;
-        origDispatch = null;
-    }
+    unpatchDispatch?.();
+    unpatchDispatch = null;
+    unpatchSend?.();
+    unpatchSend = null;
+    unpatchEdit?.();
+    unpatchEdit = null;
     unpatchActionSheet?.();
     unpatchActionSheet = null;
     sanitizeLog.length = 0;
