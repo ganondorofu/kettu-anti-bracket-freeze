@@ -8,7 +8,7 @@ This is the Kettu (mobile) rewrite of [vencord-anti-bracket-freeze](https://gith
 
 Discord's Markdown renderer is vulnerable to ReDoS (Regular Expression Denial of Service) attacks. Certain crafted strings — such as a large number of consecutive `[` brackets, pipe characters, backticks, or Unicode combining characters — can cause the renderer to hang, freezing the client.
 
-This plugin uses Kettu's `bunny.api.flux.intercept` API to sanitize dangerous content before it reaches the Flux store / renderer:
+This plugin patches `FluxDispatcher.dispatch` (via Kettu's legacy `vendetta`-compat API) to sanitize dangerous content before it reaches the Flux store / renderer:
 
 - Message content (`MESSAGE_CREATE`, `MESSAGE_UPDATE`, `LOAD_MESSAGES_SUCCESS`)
 - Channel names and topics (`CHANNEL_CREATE`, `CHANNEL_UPDATE`)
@@ -32,28 +32,20 @@ npm install
 npm run build
 ```
 
-This bundles `index.ts` into `builds/anti-bracket-freeze/index.js` (IIFE, `plugin` global) via esbuild, and copies `manifest.json` alongside it, matching the format Kettu's plugin loader expects:
+This transpiles `index.ts` and wraps it into `index.js` as a single JS expression:
 
 ```js
-(bunny, definePlugin) => { /* index.js contents */ ; return plugin?.default ?? plugin; }
+(function(vendetta){ /* transpiled body */ return { onLoad, onUnload }; })(vendetta)
 ```
 
-## Repository layout
-
-Kettu installs plugins from a *repository* URL, not a single manifest. The repo root must expose:
-
-```
-repo.json                          # { "$meta": {...}, "<plugin-id>": { "version": "..." } }
-builds/<plugin-id>/manifest.json
-builds/<plugin-id>/index.js
-```
+which is exactly what Kettu's single-plugin installer expects — it fetches `<url>manifest.json` and `<url>index.js`, then evaluates the JS as `vendetta => { return <index.js content> }` (see `src/core/vendetta/plugins.ts` in Kettu). The build script also (re)computes `manifest.json`'s `hash` field from the built output.
 
 ## Installing in Kettu
 
-1. Push this repo to GitHub (or host it anywhere reachable) so `repo.json` is served at the root, e.g.
+1. Push this repo to GitHub so `manifest.json` and `index.js` are served at the root, e.g.
    `https://raw.githubusercontent.com/ganondorofu/kettu-anti-bracket-freeze/master/`
-2. In Kettu, go to Plugins → add a plugin repository, and paste that base URL (the folder containing `repo.json`, not `repo.json` itself).
-3. The repo should now list **AntiBracketFreeze** — install and enable it.
+2. In Kettu, go to Plugins → install/add a plugin, and paste that base URL **with a trailing slash**.
+3. Enable **AntiBracketFreeze**.
 
 ## Debugging
 

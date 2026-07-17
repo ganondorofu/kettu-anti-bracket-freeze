@@ -1,7 +1,12 @@
-// Kettu (Bunny-fork) native plugin. Runs against the `bunny` global injected
-// by the plugin loader: (bunny, definePlugin) => { <this file>; return plugin?.default ?? plugin; }
-declare const bunny: any;
-declare const definePlugin: <T extends Record<string, any>>(p: T) => T;
+// Kettu / Bunny "vendetta-compat" plugin body.
+// This file's contents get wrapped by build.mjs into:
+//   (function(vendetta){ <transpiled body> return { onLoad, onUnload }; })(vendetta)
+// which is exactly what Kettu's legacy single-plugin installer expects at
+// `<repoUrl>/index.js` (see src/core/vendetta/plugins.ts: evalPlugin).
+declare const vendetta: any;
+
+const FluxDispatcher = vendetta.metro.common.FluxDispatcher;
+const logger = vendetta.logger;
 
 const COMBINING_TEST = /[̀-ͯ҃-҉᷀-᷿⃐-⃿]{50,}/;
 
@@ -17,7 +22,6 @@ function isDangerous(content: unknown): boolean {
 const BLOCK_PLACEHOLDER = "⚠️ Message blocked by AntiBracketFreeze (possible ReDoS payload)";
 
 const sanitizeLog: { type: string; field: string; preview: string; }[] = [];
-let logger: any;
 
 function log(type: string, field: string, content: string) {
     const entry = { type, field, preview: content.slice(0, 80) };
@@ -54,48 +58,46 @@ function patchGuild(guild: any) {
     guild.roles?.forEach?.((r: any) => sanitizeStr(r, "name", "role"));
 }
 
-function onDispatch(payload: any) {
+let origDispatch: Function | null = null;
+
+function patchedDispatch(this: any, action: any) {
     try {
-        switch (payload?.type) {
+        switch (action?.type) {
             case "MESSAGE_CREATE":
             case "MESSAGE_UPDATE":
-                patchMessage(payload.message);
+                patchMessage(action.message);
                 break;
             case "LOAD_MESSAGES_SUCCESS":
-                payload.messages?.forEach?.(patchMessage);
+                action.messages?.forEach?.(patchMessage);
                 break;
             case "GUILD_CREATE":
             case "GUILD_UPDATE":
-                patchGuild(payload.guild);
+                patchGuild(action.guild);
                 break;
             case "CHANNEL_CREATE":
             case "CHANNEL_UPDATE":
-                patchChannel(payload.channel);
+                patchChannel(action.channel);
                 break;
             case "CONNECTION_OPEN":
-                payload.guilds?.forEach?.(patchGuild);
+                action.guilds?.forEach?.(patchGuild);
                 break;
         }
     } catch (e) {
-        logger?.error("[AntiBracketFreeze] intercept error:", e);
+        logger?.error("[AntiBracketFreeze] dispatch error:", e);
     }
-    // undefined => leave dispatch as-is (we already mutated the payload in place)
-    return undefined;
+    return origDispatch!.call(this, action);
 }
 
-let unintercept: (() => void) | null = null;
+function onLoad() {
+    origDispatch = FluxDispatcher.dispatch.bind(FluxDispatcher);
+    FluxDispatcher.dispatch = patchedDispatch;
+    (globalThis as any).__antiBFLog = sanitizeLog;
+}
 
-export default definePlugin({
-    start() {
-        logger = bunny.plugin.logger;
-        unintercept = bunny.api.flux.intercept(onDispatch);
-        // Exposed for debugging, mirrors the old Vencord build's window.__antiBFLog
-        (globalThis as any).__antiBFLog = sanitizeLog;
-    },
-
-    stop() {
-        unintercept?.();
-        unintercept = null;
-        sanitizeLog.length = 0;
-    },
-});
+function onUnload() {
+    if (origDispatch) {
+        FluxDispatcher.dispatch = origDispatch;
+        origDispatch = null;
+    }
+    sanitizeLog.length = 0;
+}

@@ -1,9 +1,0 @@
-{
-  "$meta": {
-    "name": "AntiBracketFreeze",
-    "description": "Blocks ReDoS-triggering content at the Flux layer"
-  },
-  "anti-bracket-freeze": {
-    "version": "1.0.0"
-  }
-}

@@ -1,21 +1,26 @@
-import { build } from "esbuild";
-import { copyFileSync, mkdirSync } from "node:fs";
+import { transformSync } from "esbuild";
+import { readFileSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 
-const PLUGIN_ID = "anti-bracket-freeze";
+// Kettu's legacy single-plugin installer (src/core/vendetta/plugins.ts) fetches
+// `<repoUrl>/manifest.json` and `<repoUrl>/index.js`, then evaluates the JS as:
+//   vendetta => { return <index.js content> }
+// so index.js must be a single JS *expression*, not statements. We transpile
+// our TS source and wrap it as an IIFE expression that closes over `vendetta`.
+const body = readFileSync("index.ts", "utf8");
 
-mkdirSync(`builds/${PLUGIN_ID}`, { recursive: true });
-
-// The Kettu plugin loader wraps the bundled code as:
-//   (bunny, definePlugin) => { <this output>; return plugin?.default ?? plugin; }
-// so the IIFE just needs to assign its export to the global `plugin` var.
-await build({
-    entryPoints: ["index.ts"],
-    outfile: `builds/${PLUGIN_ID}/index.js`,
-    bundle: true,
-    format: "iife",
-    globalName: "plugin",
-    target: "esnext",
+const { code } = transformSync(body, {
+    loader: "ts",
     minify: true,
+    target: "esnext",
 });
 
-copyFileSync("manifest.json", `builds/${PLUGIN_ID}/manifest.json`);
+const iife = `(function(vendetta){${code}return{onLoad:onLoad,onUnload:onUnload};})(vendetta)`;
+writeFileSync("index.js", iife);
+
+const hash = createHash("sha256").update(iife, "utf8").digest("hex").toUpperCase();
+const manifest = JSON.parse(readFileSync("manifest.json", "utf8"));
+manifest.hash = hash;
+writeFileSync("manifest.json", JSON.stringify(manifest, null, 2) + "\n");
+
+console.log(`Built index.js (${iife.length} bytes), hash ${hash}`);
