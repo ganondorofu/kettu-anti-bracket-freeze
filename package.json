@@ -1,0 +1,13 @@
+{
+  "name": "kettu-anti-bracket-freeze",
+  "version": "1.0.0",
+  "description": "Kettu plugin that blocks ReDoS-triggering content at the Flux layer",
+  "private": true,
+  "scripts": {
+    "build": "node build.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "^0.24.0"
+  },
+  "license": "MIT"
+}
