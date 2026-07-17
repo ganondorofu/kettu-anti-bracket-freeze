@@ -14,7 +14,9 @@ This plugin patches `FluxDispatcher.dispatch` (via Kettu's legacy `vendetta`-com
 - Channel names and topics (`CHANNEL_CREATE`, `CHANNEL_UPDATE`)
 - Server names, descriptions, role names, and channel/thread lists (`GUILD_CREATE`, `GUILD_UPDATE`, `CONNECTION_OPEN`)
 
-Blocked message content is replaced with a placeholder string; the original content is written to the plugin's logger and kept in `globalThis.__antiBFLog` for debugging.
+Blocked message content is replaced with a placeholder string. The original content is written to the plugin's logger and kept in `globalThis.__antiBFLog` for debugging, and can also be viewed in-app: long-press a blocked message and tap **Show Original** in the action sheet, which shows the raw text in a plain alert dialog (not passed through the Markdown renderer, so it stays safe).
+
+> The long-press "Show Original" button patches Discord's `MessageLongPressActionSheet` (found via `findByProps("openLazy", "hideActionSheet")`), based on a pattern used by other published Kettu plugins. It hasn't been verified against every Discord client build — if the row doesn't appear, the block/placeholder behavior still works regardless, and blocked content remains available via `globalThis.__antiBFLog`.
 
 ### Detection thresholds
 

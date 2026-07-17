@@ -6,7 +6,11 @@
 declare const vendetta: any;
 
 const FluxDispatcher = vendetta.metro.common.FluxDispatcher;
+const React = vendetta.metro.common.React;
 const logger = vendetta.logger;
+const { findInReactTree } = vendetta.utils;
+const { showConfirmationAlert } = vendetta.ui.alerts;
+const { getAssetIDByName } = vendetta.ui.assets;
 
 const COMBINING_TEST = /[̀-ͯ҃-҉᷀-᷿⃐-⃿]{50,}/;
 
@@ -19,9 +23,11 @@ function isDangerous(content: unknown): boolean {
     return false;
 }
 
-const BLOCK_PLACEHOLDER = "⚠️ Message blocked by AntiBracketFreeze (possible ReDoS payload)";
+const BLOCK_PLACEHOLDER = "⚠️ Message blocked by AntiBracketFreeze — long-press → \"Show Original\" to view (possible ReDoS payload)";
 
 const sanitizeLog: { type: string; field: string; preview: string; }[] = [];
+// messageId -> original raw content, kept so the long-press action sheet can reveal it
+const blockedContent = new Map<string, string>();
 
 function log(type: string, field: string, content: string) {
     const entry = { type, field, preview: content.slice(0, 80) };
@@ -39,6 +45,7 @@ function patchMessage(msg: any) {
     if (!msg?.id) return;
     if (isDangerous(msg.content)) {
         log("message", "content", msg.content);
+        blockedContent.set(msg.id, msg.content);
         msg.content = BLOCK_PLACEHOLDER;
     }
 }
@@ -88,10 +95,85 @@ function patchedDispatch(this: any, action: any) {
     return origDispatch!.call(this, action);
 }
 
+// Adds a "Show Original" row to the message long-press action sheet when the
+// long-pressed message was blocked, letting the user view the raw (unrendered,
+// so still ReDoS-safe) content on demand instead of losing it entirely.
+function injectShowOriginalRow(sheetTree: any, content: string) {
+    const rows = findInReactTree(sheetTree, (node: any) =>
+        Array.isArray(node) && (
+            node[0]?.type?.name === "ButtonRow"
+            || node[0]?.type?.name === "ActionSheetRow"
+            || node[0]?.type?.name === "TableRow"
+        ));
+
+    if (!rows || !Array.isArray(rows)) return sheetTree;
+
+    const template = rows.find(Boolean);
+    if (!template?.type) return sheetTree;
+
+    const onPress = () => {
+        try {
+            LazyActionSheet?.hideActionSheet?.();
+        } catch { }
+        showConfirmationAlert({
+            title: "Blocked Message",
+            content,
+            confirmText: "OK",
+            onConfirm: () => { },
+        });
+    };
+
+    const row = React.createElement(template.type, {
+        ...template.props,
+        key: "anti-bracket-freeze-show-original",
+        label: "Show Original",
+        message: "Show Original",
+        title: "Show Original",
+        text: "Show Original",
+        icon: getAssetIDByName?.("EyeIcon") ?? template.props?.icon,
+        isDestructive: false,
+        onPress,
+        action: onPress,
+    });
+
+    rows.unshift(row);
+    return sheetTree;
+}
+
+let LazyActionSheet: any = null;
+let unpatchActionSheet: (() => void) | null = null;
+
+function patchMessageLongPressSheet() {
+    LazyActionSheet = vendetta.metro.findByProps("openLazy", "hideActionSheet");
+    if (!LazyActionSheet || typeof LazyActionSheet.openLazy !== "function") return;
+
+    unpatchActionSheet = vendetta.patcher.before("openLazy", LazyActionSheet, ([component, key, ctx]: any[]) => {
+        const messageId = ctx?.message?.id;
+        if (key !== "MessageLongPressActionSheet" || !messageId || !blockedContent.has(messageId)) return;
+
+        const content = blockedContent.get(messageId)!;
+
+        Promise.resolve(component).then((mod: any) => {
+            if (!mod || typeof mod.default !== "function") return;
+
+            const unpatchRender = vendetta.patcher.after("default", mod, (_args: any, sheetTree: any) => {
+                React.useEffect(() => () => unpatchRender(), []);
+                return injectShowOriginalRow(sheetTree, content);
+            });
+        }).catch(() => { });
+    });
+}
+
 function onLoad() {
     origDispatch = FluxDispatcher.dispatch.bind(FluxDispatcher);
     FluxDispatcher.dispatch = patchedDispatch;
     (globalThis as any).__antiBFLog = sanitizeLog;
+
+    try {
+        patchMessageLongPressSheet();
+    } catch (e) {
+        logger?.error("[AntiBracketFreeze] failed to patch action sheet:", e);
+    }
 }
 
 function onUnload() {
@@ -99,5 +181,8 @@ function onUnload() {
         FluxDispatcher.dispatch = origDispatch;
         origDispatch = null;
     }
+    unpatchActionSheet?.();
+    unpatchActionSheet = null;
     sanitizeLog.length = 0;
+    blockedContent.clear();
 }
