@@ -7,11 +7,17 @@ declare const vendetta: any;
 
 const FluxDispatcher = vendetta.metro.common.FluxDispatcher;
 const React = vendetta.metro.common.React;
+const ReactNative = vendetta.metro.common.ReactNative;
 const logger = vendetta.logger;
 const { findInReactTree } = vendetta.utils;
-const { showConfirmationAlert } = vendetta.ui.alerts;
+const { showCustomAlert } = vendetta.ui.alerts;
 const { getAssetIDByName } = vendetta.ui.assets;
 const { showToast } = vendetta.ui.toasts;
+
+// Cap how much raw text we ever render in the "Show Original" view. Even
+// without going through the Markdown parser, dumping tens of thousands of
+// repeated characters into a single Text node can itself be slow to lay out.
+const MAX_PREVIEW_LENGTH = 2000;
 
 const COMBINING_TEST = /[̀-ͯ҃-҉᷀-᷿⃐-⃿]{50,}/;
 
@@ -134,6 +140,27 @@ function patchOutgoing() {
     }
 }
 
+// Plain-text viewer for blocked content. Deliberately renders via
+// ReactNative.Text directly instead of passing the string into Discord's own
+// Alert `content`/`body` prop — that prop gets run through Discord's Markdown
+// renderer (the same one vulnerable to the ReDoS this plugin guards against),
+// which defeats the purpose and is why the old confirmation-alert reveal felt
+// heavy/slow on large blocked payloads.
+function BlockedContentView({ content }: { content: string; }) {
+    const truncated = content.length > MAX_PREVIEW_LENGTH;
+    const shown = truncated ? content.slice(0, MAX_PREVIEW_LENGTH) : content;
+
+    return React.createElement(
+        ReactNative.ScrollView,
+        { style: { maxHeight: 400, padding: 16 } },
+        React.createElement(
+            ReactNative.Text,
+            { selectable: true, style: { color: "white", fontFamily: "monospace" } },
+            shown + (truncated ? `\n…(${content.length - MAX_PREVIEW_LENGTH} more characters truncated)` : "")
+        )
+    );
+}
+
 // Adds a "Show Original" row to the message long-press action sheet when the
 // long-pressed message was blocked, letting the user view the raw (unrendered,
 // so still ReDoS-safe) content on demand instead of losing it entirely.
@@ -154,12 +181,7 @@ function injectShowOriginalRow(sheetTree: any, content: string) {
         try {
             LazyActionSheet?.hideActionSheet?.();
         } catch { }
-        showConfirmationAlert({
-            title: "Blocked Message",
-            content,
-            confirmText: "OK",
-            onConfirm: () => { },
-        });
+        showCustomAlert(BlockedContentView, { content });
     };
 
     const row = React.createElement(template.type, {
